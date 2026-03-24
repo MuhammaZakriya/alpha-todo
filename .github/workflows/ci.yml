@@ -41,23 +41,22 @@ jobs:
         run: docker compose ps
 
       # Backend check (internal network)
-      - name: Test backend container
+      - name: Test backend service
         run: |
           docker run --rm --network todo-network curlimages/curl:8.5.0 \
           curl -f http://backend:8000/docs
 
       # Frontend check
-      - name: Test frontend container
+      - name: Test frontend service
         run: |
           docker run --rm --network todo-network curlimages/curl:8.5.0 \
           curl -f http://frontend/
 
-      # Backend tests inside container
-      - name: Install backend test dependencies
-        run: pip install -r backend/requirements.txt
-
+      # Run backend Python tests
       - name: Run backend tests
-        run: python -m pytest backend/tests/
+        run: |
+          pip install -r backend/requirements.txt
+          PYTHONPATH=./backend python -m pytest backend/tests/
 
       # Debug if something breaks
       - name: Show logs on failure
