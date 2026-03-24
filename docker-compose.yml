@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  # MongoDB Database
+  mongo:
+    image: mongo:6.0
+    container_name: mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - todo-network
+
+  # Backend API
+  backend:
+    image: todo-backend:latest
+    container_name: todo-backend
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    depends_on:
+      - mongo
+    networks:
+      - todo-network
+
+  # Frontend
+  frontend:
+    image: todo-frontend:latest
+    container_name: todo-frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    networks:
+      - todo-network
+
+# Persistent volume
+volumes:
+  mongo-data:
+    name: mongo-data
+    external: true  # Use existing volume from your manual setup
+
+# Custom network
+networks:
+  todo-network:
+    name: todo-network
+    external: true  # Use existing network

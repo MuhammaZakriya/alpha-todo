@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.env
+*.sqlite3
+*.egg-info/
+dist/
+build/
+
+# Node / Frontend
+node_modules/
+npm-debug.log
+yarn-error.log
+*.lock
+
+# Docker
+*.log
+*.pid
+docker-compose.override.yml
+
+# VSCode / IDE
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db

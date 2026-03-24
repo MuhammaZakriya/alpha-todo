@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  docker-ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Check Docker
+        run: |
+          docker --version
+          docker compose version
+
+      # ✅ Required because you used external: true
+      - name: Create network if missing
+        run: |
+          docker network inspect todo-network >/dev/null 2>&1 || \
+          docker network create todo-network
+
+      - name: Create volume if missing
+        run: |
+          docker volume inspect mongo-data >/dev/null 2>&1 || \
+          docker volume create mongo-data
+
+      - name: Build images
+        run: docker compose build
+
+      - name: Start containers
+        run: docker compose up -d
+
+      - name: Wait for services to be ready
+        run: sleep 12
+
+      - name: Show running containers
+        run: docker compose ps
+
+      # Backend check (internal network)
+      - name: Test backend
+        run: |
+          docker run --rm --network todo-network curlimages/curl:8.5.0 \
+          curl -f http://backend:8000/docs
+
+      # Frontend check
+      - name: Test frontend
+        run: |
+          docker run --rm --network todo-network curlimages/curl:8.5.0 \
+          curl -f http://frontend/
+
+      # Debug if something breaks
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Shutdown
+        if: always()
+        run: docker compose down
