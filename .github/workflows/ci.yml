@@ -41,16 +41,27 @@ jobs:
         run: docker compose ps
 
       # Backend check (internal network)
-      - name: Test backend
+      - name: Test backend availability
         run: |
           docker run --rm --network todo-network curlimages/curl:8.5.0 \
           curl -f http://backend:8000/docs
 
       # Frontend check
-      - name: Test frontend
+      - name: Test frontend availability
         run: |
           docker run --rm --network todo-network curlimages/curl:8.5.0 \
           curl -f http://frontend/
+
+      # Run backend tests inside container
+      - name: Run backend tests
+        run: |
+          docker exec -w /app todo-backend python -m pytest tests/
+
+      # Run frontend tests inside container
+      - name: Run frontend tests
+        run: |
+          docker exec -w /app/frontend todo-frontend npm ci
+          docker exec -w /app/frontend todo-frontend npm run test -- --run
 
       # Debug if something breaks
       - name: Show logs on failure
