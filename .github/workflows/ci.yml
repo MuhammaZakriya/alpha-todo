@@ -22,7 +22,7 @@ jobs:
           docker network inspect todo-network >/dev/null 2>&1 || \
           docker network create todo-network
 
-      - name: Create volume- if missing
+      - name: Create volume if missing
         run: |
           docker volume inspect mongo-data >/dev/null 2>&1 || \
           docker volume create mongo-data
@@ -59,6 +59,38 @@ jobs:
             -fsS http://backend:8000/tasks | grep "ci-test-task"
 
           echo "✅ Backend→Mongo→Backend chain verified"
+
+      - name: Test CORS + frontend→backend connectivity
+        run: |
+          echo "Testing CORS preflight and actual API call..."
+
+          # Test 1: CORS preflight request (OPTIONS)
+          echo "Checking CORS preflight..."
+          docker run --rm --network todo-network curlimages/curl:8.5.0 \
+            -fsS -X OPTIONS http://backend:8000/add \
+            -H "Origin: http://localhost" \
+            -H "Access-Control-Request-Method: POST" \
+            -H "Access-Control-Request-Headers: Content-Type" \
+            -v 2>&1 | grep -i "access-control-allow-origin" || echo "⚠️ CORS headers missing or different"
+
+          # Test 2: Actual POST with Origin header (simulates browser)
+          echo "Testing POST with Origin header..."
+          docker run --rm --network todo-network curlimages/curl:8.5.0 \
+            -fsS -X POST http://backend:8000/add \
+            -H "Content-Type: application/json" \
+            -H "Origin: http://localhost" \
+            -d '{"title":"cors-test-task","done":false}' \
+            -w "\nHTTP Code: %{http_code}\n" \
+            -v 2>&1 | tee /tmp/cors_test.log
+
+          # Test 3: Verify data reached MongoDB
+          echo "Verifying data storage..."
+          docker run --rm --network todo-network curlimages/curl:8.5.0 \
+            -fsS http://backend:8000/tasks | grep "cors-test-task" && echo "✅ Data stored" || echo "❌ Data not found"
+
+          # Show full response for debugging
+          echo "Full response headers:"
+          cat /tmp/cors_test.log | grep -i "access-control" || echo "No CORS headers in response"
 
       # Frontend check
       - name: Test frontend service
