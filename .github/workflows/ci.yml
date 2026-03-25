@@ -1,7 +1,8 @@
-name: CI
+name: CI/CD
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
@@ -39,13 +40,11 @@ jobs:
       - name: Show running containers
         run: docker compose ps
 
-      # Backend check (internal network)
       - name: Test backend service
         run: |
           docker run --rm --network todo-network curlimages/curl:8.5.0 \
             -fsS http://backend:8000/docs
 
-      # Test full chain: backend → mongo → backend → response
       - name: Test backend→mongo connectivity
         run: |
           echo "Adding test task to backend..."
@@ -64,7 +63,6 @@ jobs:
         run: |
           echo "Testing CORS preflight and actual API call..."
 
-          # Test 1: CORS preflight request (OPTIONS)
           echo "Checking CORS preflight..."
           docker run --rm --network todo-network curlimages/curl:8.5.0 \
             -fsS -X OPTIONS http://backend:8000/add \
@@ -73,7 +71,6 @@ jobs:
             -H "Access-Control-Request-Headers: Content-Type" \
             -v 2>&1 | grep -i "access-control-allow-origin" || echo "⚠️ CORS headers missing or different"
 
-          # Test 2: Actual POST with Origin header (simulates browser)
           echo "Testing POST with Origin header..."
           docker run --rm --network todo-network curlimages/curl:8.5.0 \
             -fsS -X POST http://backend:8000/add \
@@ -83,28 +80,23 @@ jobs:
             -w "\nHTTP Code: %{http_code}\n" \
             -v 2>&1 | tee /tmp/cors_test.log
 
-          # Test 3: Verify data reached MongoDB
           echo "Verifying data storage..."
           docker run --rm --network todo-network curlimages/curl:8.5.0 \
             -fsS http://backend:8000/tasks | grep "cors-test-task" && echo "✅ Data stored" || echo "❌ Data not found"
 
-          # Show full response for debugging
           echo "Full response headers:"
           cat /tmp/cors_test.log | grep -i "access-control" || echo "No CORS headers in response"
 
-      # Frontend check
       - name: Test frontend service
         run: |
           docker run --rm --network todo-network curlimages/curl:8.5.0 \
             -fsS http://frontend/
 
-      # Run backend Python tests
       - name: Run backend tests
         run: |
           pip install -r backend/requirements.txt
           PYTHONPATH=./backend python -m pytest backend/tests/
 
-      # Debug if something breaks
       - name: Show logs on failure
         if: failure()
         run: docker compose logs
@@ -112,3 +104,42 @@ jobs:
       - name: Shutdown
         if: always()
         run: docker compose down
+
+  deploy-local:
+    needs: docker-ci
+    runs-on: [self-hosted, local, laptop]
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Shutdown existing local stack
+        run: docker compose down || true
+
+      - name: Build and start local deployment
+        run: docker compose up -d --build
+
+      - name: Wait for services
+        run: sleep 15
+
+      - name: Health check - Backend
+        run: curl -fsS http://localhost:8000/docs
+
+      - name: Health check - Frontend
+        run: curl -fsS http://localhost:5173
+
+      - name: Show running containers
+        run: docker compose ps
+
+      - name: Display local URLs
+        run: |
+          echo "========================================"
+          echo "🚀 DEPLOYED LOCALLY ON SELF-HOSTED RUNNER"
+          echo "========================================"
+          echo "Frontend: http://localhost:5173"
+          echo "Backend:  http://localhost:8000/docs"
+          echo "MongoDB:  localhost:27017"
+          echo "========================================"
+          echo "Access these URLs on your local machine"
+          echo "========================================"
