@@ -1,32 +1,33 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 function App() {
   const [tasks, setTasks] = useState([]);
   const [taskText, setTaskText] = useState("");
 
-  // Use environment variable with fallback to localhost
   const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-  const fetchTasks = async () => {
+  // ✅ Fix 1: useCallback to prevent ESLint warning
+  const fetchTasks = useCallback(async () => {
     const res = await fetch(`${API_URL}/tasks`);
     const data = await res.json();
     setTasks(data);
-  };
+  }, [API_URL]);
 
   const addTask = async () => {
     if (!taskText) return;
     await fetch(`${API_URL}/add`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ task: taskText }),
+      body: JSON.stringify({ title: taskText, done: false }), // ✅ Fix 2: task → title
     });
     setTaskText("");
     fetchTasks();
   };
 
+  // ✅ Fix 3: Add fetchTasks to dependency array
   useEffect(() => {
     fetchTasks();
-  }, []);
+  }, [fetchTasks]);
 
   return (
     <div style={{ padding: 20 }}>
@@ -40,7 +41,7 @@ function App() {
 
       <ul>
         {tasks.map((t, i) => (
-          <li key={i}>{t.task}</li>
+          <li key={i}>{t.title}</li> // ✅ Fix 4: t.task → t.title
         ))}
       </ul>
     </div>
