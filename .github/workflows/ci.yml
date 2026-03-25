@@ -145,8 +145,8 @@ jobs:
         run: |
           sleep 10
           docker ps
-          curl -fsS http://localhost:8000/docs || exit 1
-          curl -fsS http://localhost:5173 || exit 1
+          curl -fsS http://localhost:8000/docs1 || exit 1
+          curl -fsS http://localhost:51731 || exit 1
 
       - name: Display deployed version
         run: |
