@@ -22,7 +22,7 @@ jobs:
           docker network inspect todo-network >/dev/null 2>&1 || \
           docker network create todo-network
 
-      - name: Create volume if missing
+      - name: Create volume- if missing
         run: |
           docker volume inspect mongo-data >/dev/null 2>&1 || \
           docker volume create mongo-data
