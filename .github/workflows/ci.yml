@@ -17,7 +17,6 @@ jobs:
           docker --version
           docker compose version
 
-      # ✅ Required because you used external: true
       - name: Create network if missing
         run: |
           docker network inspect todo-network >/dev/null 2>&1 || \
@@ -44,13 +43,28 @@ jobs:
       - name: Test backend service
         run: |
           docker run --rm --network todo-network curlimages/curl:8.5.0 \
-          curl -f http://backend:8000/docs
+            -fsS http://backend:8000/docs
+
+      # Test full chain: backend → mongo → backend → response
+      - name: Test backend→mongo connectivity
+        run: |
+          echo "Adding test task to backend..."
+          docker run --rm --network todo-network curlimages/curl:8.5.0 \
+            -fsS -X POST http://backend:8000/add \
+            -H "Content-Type: application/json" \
+            -d '{"title":"ci-test-task","done":false}'
+
+          echo "Verifying task was stored in MongoDB..."
+          docker run --rm --network todo-network curlimages/curl:8.5.0 \
+            -fsS http://backend:8000/tasks | grep "ci-test-task"
+
+          echo "✅ Backend→Mongo→Backend chain verified"
 
       # Frontend check
       - name: Test frontend service
         run: |
           docker run --rm --network todo-network curlimages/curl:8.5.0 \
-          curl -f http://frontend/
+            -fsS http://frontend/
 
       # Run backend Python tests
       - name: Run backend tests
