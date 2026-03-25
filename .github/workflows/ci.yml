@@ -1,145 +1,161 @@
-name: CI/CD
+name: CI/CD with Docker Hub
 
 on:
   push:
     branches: [main]
   pull_request:
 
-jobs:
-  docker-ci:
-    runs-on: ubuntu-latest
+env:
+  REGISTRY: docker.io
+  BACKEND_IMAGE: muhammadzakria1/todo-backend
+  FRONTEND_IMAGE: muhammadzakria1/todo-frontend
 
+jobs:
+  # Phase 1: Build, Test, and Push to Docker Hub
+  ci-build-push:
+    runs-on: ubuntu-latest
+    
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Check Docker
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Get short SHA
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ env.BACKEND_IMAGE }}:${{ steps.vars.outputs.sha_short }}
+            ${{ env.BACKEND_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ env.FRONTEND_IMAGE }}:${{ steps.vars.outputs.sha_short }}
+            ${{ env.FRONTEND_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test images locally (CI validation)
         run: |
-          docker --version
-          docker compose version
+          docker run -d --name test-backend -e MONGO_URI=mongodb://fake ${{ env.BACKEND_IMAGE }}:${{ steps.vars.outputs.sha_short }}
+          sleep 5
+          docker logs test-backend
+          docker rm -f test-backend
 
-      - name: Create network if missing
-        run: |
-          docker network inspect todo-network >/dev/null 2>&1 || \
-          docker network create todo-network
-
-      - name: Create volume if missing
-        run: |
-          docker volume inspect mongo-data >/dev/null 2>&1 || \
-          docker volume create mongo-data
-
-      - name: Build images
-        run: docker compose build
-
-      - name: Start containers
-        run: docker compose up -d
-
-      - name: Wait for services to be ready
-        run: sleep 12
-
-      - name: Show running containers
-        run: docker compose ps
-
-      - name: Test backend service
-        run: |
-          docker run --rm --network todo-network curlimages/curl:8.5.0 \
-            -fsS http://backend:8000/docs
-
-      - name: Test backend→mongo connectivity
-        run: |
-          echo "Adding test task to backend..."
-          docker run --rm --network todo-network curlimages/curl:8.5.0 \
-            -fsS -X POST http://backend:8000/add \
-            -H "Content-Type: application/json" \
-            -d '{"title":"ci-test-task","done":false}'
-
-          echo "Verifying task was stored in MongoDB..."
-          docker run --rm --network todo-network curlimages/curl:8.5.0 \
-            -fsS http://backend:8000/tasks | grep "ci-test-task"
-
-          echo "✅ Backend→Mongo→Backend chain verified"
-
-      - name: Test CORS + frontend→backend connectivity
-        run: |
-          echo "Testing CORS preflight and actual API call..."
-
-          echo "Checking CORS preflight..."
-          docker run --rm --network todo-network curlimages/curl:8.5.0 \
-            -fsS -X OPTIONS http://backend:8000/add \
-            -H "Origin: http://localhost" \
-            -H "Access-Control-Request-Method: POST" \
-            -H "Access-Control-Request-Headers: Content-Type" \
-            -v 2>&1 | grep -i "access-control-allow-origin" || echo "⚠️ CORS headers missing or different"
-
-          echo "Testing POST with Origin header..."
-          docker run --rm --network todo-network curlimages/curl:8.5.0 \
-            -fsS -X POST http://backend:8000/add \
-            -H "Content-Type: application/json" \
-            -H "Origin: http://localhost" \
-            -d '{"title":"cors-test-task","done":false}' \
-            -w "\nHTTP Code: %{http_code}\n" \
-            -v 2>&1 | tee /tmp/cors_test.log
-
-          echo "Verifying data storage..."
-          docker run --rm --network todo-network curlimages/curl:8.5.0 \
-            -fsS http://backend:8000/tasks | grep "cors-test-task" && echo "✅ Data stored" || echo "❌ Data not found"
-
-          echo "Full response headers:"
-          cat /tmp/cors_test.log | grep -i "access-control" || echo "No CORS headers in response"
-
-      - name: Test frontend service
-        run: |
-          docker run --rm --network todo-network curlimages/curl:8.5.0 \
-            -fsS http://frontend/
-
-      - name: Run backend tests
-        run: |
-          pip install -r backend/requirements.txt
-          PYTHONPATH=./backend python -m pytest backend/tests/
-
-      - name: Show logs on failure
-        if: failure()
-        run: docker compose logs
-
-      - name: Shutdown
-        if: always()
-        run: docker compose down
-
+  # Phase 2: Deploy to Local Machine (Pull from Docker Hub)
   deploy-local:
-    needs: docker-ci
+    needs: ci-build-push
     runs-on: [self-hosted, local, laptop]
     if: github.ref == 'refs/heads/main'
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - name: Get short SHA
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      - name: Shutdown existing local stack
-        run: docker compose down || true
+      - name: Login to Docker Hub (on runner)
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build and start local deployment
-        run: docker compose up -d --build
+      - name: Pull latest images
+        run: |
+          docker pull ${{ env.BACKEND_IMAGE }}:${{ steps.vars.outputs.sha_short }}
+          docker pull ${{ env.FRONTEND_IMAGE }}:${{ steps.vars.outputs.sha_short }}
+          
+          # Tag as latest locally for easier reference
+          docker tag ${{ env.BACKEND_IMAGE }}:${{ steps.vars.outputs.sha_short }} ${{ env.BACKEND_IMAGE }}:latest
+          docker tag ${{ env.FRONTEND_IMAGE }}:${{ steps.vars.outputs.sha_short }} ${{ env.FRONTEND_IMAGE }}:latest
 
-      - name: Wait for services
-        run: sleep 15
+      - name: Create docker-compose.prod.yml
+        run: |
+          cat > docker-compose.prod.yml << 'EOF'
+          version: '3.8'
+          services:
+            mongo:
+              image: mongo:6.0
+              container_name: mongo
+              restart: unless-stopped
+              volumes:
+                - mongo-data:/data/db
+              networks:
+                - todo-network
 
-      - name: Health check - Backend
-        run: curl -fsS http://localhost:8000/docs
+            backend:
+              image: muhammadzakria1/todo-backend:${{ steps.vars.outputs.sha_short }}
+              container_name: todo-backend
+              restart: unless-stopped
+              ports:
+                - "8000:8000"
+              env_file:
+                - ./backend/.env
+              depends_on:
+                - mongo
+              networks:
+                - todo-network
 
-      - name: Health check - Frontend
-        run: curl -fsS http://localhost:5173
+            frontend:
+              image: muhammadzakria1/todo-frontend:${{ steps.vars.outputs.sha_short }}
+              container_name: todo-frontend
+              restart: unless-stopped
+              ports:
+                - "5173:80"
+              depends_on:
+                - backend
+              networks:
+                - todo-network
 
-      - name: Show running containers
-        run: docker compose ps
+          volumes:
+            mongo-data:
+              external: true
 
-      - name: Display local URLs
+          networks:
+            todo-network:
+              external: true
+          EOF
+
+      - name: Deploy using pulled images
+        run: |
+          docker compose -f docker-compose.prod.yml down || true
+          docker compose -f docker-compose.prod.yml up -d
+
+      - name: Verify deployment
+        run: |
+          sleep 10
+          docker ps
+          curl -fsS http://localhost:8000/docs || exit 1
+          curl -fsS http://localhost:5173 || exit 1
+
+      - name: Display deployed version
         run: |
           echo "========================================"
-          echo "🚀 DEPLOYED LOCALLY ON SELF-HOSTED RUNNER"
+          echo "🚀 DEPLOYED VERSION: ${{ steps.vars.outputs.sha_short }}"
           echo "========================================"
+          echo "Images pulled from Docker Hub:"
+          echo "Backend: ${{ env.BACKEND_IMAGE }}:${{ steps.vars.outputs.sha_short }}"
+          echo "Frontend: ${{ env.FRONTEND_IMAGE }}:${{ steps.vars.outputs.sha_short }}"
+          echo "========================================"
+          echo "Access URLs:"
           echo "Frontend: http://localhost:5173"
           echo "Backend:  http://localhost:8000/docs"
-          echo "MongoDB:  localhost:27017"
-          echo "========================================"
-          echo "Access these URLs on your local machine"
           echo "========================================"

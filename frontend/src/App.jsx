@@ -6,7 +6,7 @@ function App() {
 
   const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-  // ✅ Fix 1: useCallback to prevent ESLint warning
+  
   const fetchTasks = useCallback(async () => {
     const res = await fetch(`${API_URL}/tasks`);
     const data = await res.json();
@@ -18,7 +18,7 @@ function App() {
     await fetch(`${API_URL}/add`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: taskText, done: false }), // ✅ Fix 2: task → title
+      body: JSON.stringify({ title: taskText, done: false }), 
     });
     setTaskText("");
     fetchTasks();
